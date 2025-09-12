@@ -50,6 +50,7 @@ int main (int argc, char* argv[])
         module.clock = 1;
         module.eval();
     }
+    module.reset = 0;
 
     // main operation
     for (;;) {
