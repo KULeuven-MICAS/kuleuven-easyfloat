@@ -1,0 +1,12 @@
+[workspace]
+authors = ["Josse Van Delm <josse.vandelm@gmail.com>"]
+channels = ["conda-forge"]
+name = "kuleuven-easyfloat"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+openjdk = "==17.0.17"
+mill = "==0.11.8"

@@ -2,3 +2,6 @@ project/target
 target
 test_run_dir
 out
+# pixi environments
+.pixi/*
+!.pixi/config.toml

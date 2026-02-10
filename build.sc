@@ -9,6 +9,7 @@ object v {
     "3.5.6" -> (ivy"edu.berkeley.cs::chisel3:3.5.6", ivy"edu.berkeley.cs:::chisel3-plugin:3.5.6"),
     "3.6.0" -> (ivy"edu.berkeley.cs::chisel3:3.6.0", ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0"),
     "5.0.0" -> (ivy"org.chipsalliance::chisel:5.0.0", ivy"org.chipsalliance:::chisel-plugin:5.0.0"),
+    "7.8.0" -> (ivy"org.chipsalliance::chisel:7.8.0", ivy"org.chipsalliance:::chisel-plugin:7.8.0"),
   )
   val scalatest = ivy"org.scalatest::scalatest:3.2.0"
   val scalapar = ivy"org.scala-lang.modules::scala-parallel-collections:1.0.4"
@@ -75,4 +76,22 @@ trait HardfloatPublishModule extends PublishModule {
   )
 
   def publishVersion = "1.5-SNAPSHOT"
+}
+
+object EasyFloat extends ScalaModule {
+
+  override def scalaVersion = T(v.scala)
+
+  override def moduleDeps = Seq(hardfloat("7.8.0"))
+
+  override def mainClass = T(Some("EasyFloatGenerator"))
+
+  override def ivyDeps = T {
+    super.ivyDeps() ++ Seq(
+      // scopt for CLI argument parsing
+      ivy"com.github.scopt::scopt:4.1.0",
+      // Chisel and CIRCT stage (usually inherited, but good to be explicit)
+      v.chiselCrossVersions("7.8.0")._1
+    )
+  }
 }
