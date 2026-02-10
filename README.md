@@ -1,3 +1,29 @@
+This is Josse's wrapper around Berkeley Hardfloat:
+
+I use `pixi` for this shell, but you can install the versions in the `pixi.toml` file with your own favorite package manager:
+
+```
+pixi shell
+```
+
+Example invocation through `mill`:
+
+```
+mill EasyFloat.run --operation AddRecFN --expWidth 8 --sigWidth 24 --format=hw
+```
+
+```sh
+Usage: easyfloatgenerator [options]
+
+  --operation <value>
+  --expWidth <value>
+  --sigWidth <value>
+  --intWidth <value>
+  --output-file <value>
+  --format <value>
+```
+
+
 Berkeley Hardware Floating-Point Units
 ======================================
 
