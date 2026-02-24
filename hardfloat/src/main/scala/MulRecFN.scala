@@ -108,6 +108,7 @@ class MulRecFN(expWidth: Int, sigWidth: Int) extends chisel3.RawModule
         val exceptionFlags = Output(UInt(5.W))
     })
 
+    override def desiredName = s"MulRecFN_s${sigWidth}_e${expWidth}"
     //------------------------------------------------------------------------
     //------------------------------------------------------------------------
     val mulRawFN = Module(new MulRawFN(expWidth, sigWidth))

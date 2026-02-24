@@ -4,6 +4,7 @@ import hardfloat._
 import scopt.OParser
 import java.nio.file.{Paths, Files}
 import java.nio.charset.StandardCharsets
+import chisel3.util.experimental.{forceName}
 
 case class Config(
     operation : String = "",
@@ -16,7 +17,8 @@ case class Config(
 )
 
 // These are provided as utilities and hence we implement their "modules" here
-class recFNFromFNModule(expWidth: Int, sigWidth: Int) extends RawModule {
+class recFNFromFN(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"recFNFromFN_s${sigWidth}_e${expWidth}"
   val io = IO(new Bundle {
     val in  = Input(Bits((expWidth + sigWidth).W))
     val out = Output(Bits((expWidth + sigWidth + 1).W))
@@ -25,7 +27,8 @@ class recFNFromFNModule(expWidth: Int, sigWidth: Int) extends RawModule {
   io.out := recFNFromFN(expWidth, sigWidth, io.in)
 }
 
-class fNFromRecFNModule(expWidth: Int, sigWidth: Int) extends RawModule {
+class fNFromRecFN(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"fNFromRecFN_s${sigWidth}_e${expWidth}"
   val io = IO(new Bundle {
     val in  = Input(Bits((expWidth + sigWidth + 1).W))
     val out = Output(Bits((expWidth + sigWidth).W))
@@ -43,14 +46,13 @@ class EasyFloatTop(configs: Seq[Config]) extends RawModule {
     val mod: RawModule = cfg.operation match {
       case "AddRecFN"  => Module(new hardfloat.AddRecFN(cfg.expWidth, cfg.sigWidth))
       case "MulRecFN"  => Module(new hardfloat.MulRecFN(cfg.expWidth, cfg.sigWidth))
-      case "recFNFromFN" => Module(new recFNFromFNModule(cfg.expWidth, cfg.sigWidth))
-      case "fNFromRecFN" => Module(new fNFromRecFNModule(cfg.expWidth, cfg.sigWidth))
+      case "recFNFromFN" => Module(new recFNFromFN(cfg.expWidth, cfg.sigWidth))
+      case "fNFromRecFN" => Module(new fNFromRecFN(cfg.expWidth, cfg.sigWidth))
       case "RecFNToIN" => Module(new hardfloat.RecFNToIN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
       case "INToRecFN" => Module(new hardfloat.INToRecFN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
       case _ => throw new Exception(s"Unknown operation: ${cfg.operation}")
     }
 
-    mod.suggestName(s"${cfg.operation}_e${cfg.expWidth}_s${cfg.sigWidth}_$index")
     val modWithIo = mod.asInstanceOf[{ def io: Record }]
     modWithIo.io <> DontCare
     dontTouch(modWithIo.io)
