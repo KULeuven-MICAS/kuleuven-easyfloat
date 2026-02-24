@@ -142,6 +142,7 @@ class AddRecFN(expWidth: Int, sigWidth: Int) extends RawModule
         val exceptionFlags = Output(UInt(5.W))
     })
 
+    override def desiredName = s"AddRecFN_s${sigWidth}_e${expWidth}"
     //------------------------------------------------------------------------
     //------------------------------------------------------------------------
     val addRawFN = Module(new AddRawFN(expWidth, sigWidth))
