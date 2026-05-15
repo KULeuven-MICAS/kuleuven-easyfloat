@@ -39,6 +39,32 @@ class fNFromRecFN(expWidth: Int, sigWidth: Int) extends RawModule {
   io.out := fNFromRecFN(expWidth, sigWidth, io.in)
 }
 
+// Wraps hardfloat.MulAddRecFN to give it the _s${sigWidth}_e${expWidth} suffix
+// convention (Berkeley's own desiredName uses _e_s order).
+class MulAddRecFNNamed(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"MulAddRecFN_s${sigWidth}_e${expWidth}"
+  val io = IO(new Bundle {
+    val op = Input(Bits(2.W))
+    val a = Input(Bits((expWidth + sigWidth + 1).W))
+    val b = Input(Bits((expWidth + sigWidth + 1).W))
+    val c = Input(Bits((expWidth + sigWidth + 1).W))
+    val roundingMode = Input(UInt(3.W))
+    val detectTininess = Input(UInt(1.W))
+    val out = Output(Bits((expWidth + sigWidth + 1).W))
+    val exceptionFlags = Output(Bits(5.W))
+  })
+
+  val inner = Module(new hardfloat.MulAddRecFN(expWidth, sigWidth))
+  inner.io.op := io.op
+  inner.io.a := io.a
+  inner.io.b := io.b
+  inner.io.c := io.c
+  inner.io.roundingMode := io.roundingMode
+  inner.io.detectTininess := io.detectTininess
+  io.out := inner.io.out
+  io.exceptionFlags := inner.io.exceptionFlags
+}
+
 // Wraps hardfloat.RecFNToRecFN so the emitted module is named with all four widths.
 class RecFNToRecFNNamed(inExpWidth: Int, inSigWidth: Int, outExpWidth: Int, outSigWidth: Int) extends RawModule {
   override def desiredName = s"RecFNToRecFN_is${inSigWidth}_ie${inExpWidth}_os${outSigWidth}_oe${outExpWidth}"
@@ -96,6 +122,7 @@ class EasyFloatTop(configs: Seq[Config]) extends RawModule {
       case "INToRecFN" => Module(new hardfloat.INToRecFN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
       case "CompareRecFN" => Module(new CompareRecFNNamed(cfg.expWidth, cfg.sigWidth))
       case "RecFNToRecFN" => Module(new RecFNToRecFNNamed(cfg.expWidth, cfg.sigWidth, cfg.outExpWidth, cfg.outSigWidth))
+      case "MulAddRecFN" => Module(new MulAddRecFNNamed(cfg.expWidth, cfg.sigWidth))
       case _ => throw new Exception(s"Unknown operation: ${cfg.operation}")
     }
 
