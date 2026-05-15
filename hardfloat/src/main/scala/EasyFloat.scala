@@ -1,4 +1,5 @@
 import chisel3._
+import chisel3.util.Cat
 import circt.stage.ChiselStage
 import hardfloat._
 import scopt.OParser
@@ -37,6 +38,107 @@ class fNFromRecFN(expWidth: Int, sigWidth: Int) extends RawModule {
   })
 
   io.out := fNFromRecFN(expWidth, sigWidth, io.in)
+}
+
+// ---- Raw float packed-bus helpers ----------------------------------------
+// Berkeley's `RawFloat(expWidth, sigWidth)` bundle is:
+//   { isNaN:1, isInf:1, isZero:1, sign:1, sExp:(exp+2), sig:(sig+1) }
+// We expose raw-format values as a single `UInt` bus in the order produced
+// by `Cat`, so the dialect's typed operand surface can stay uniform with
+// the existing recoded-bit-vector ops. Layout, MSB first:
+//   [isNaN] [isInf] [isZero] [sign] [sExp(exp+2)] [sig(sig+1)]
+
+object RawFloatBus {
+  def pack(raw: hardfloat.RawFloat): UInt =
+    Cat(raw.isNaN, raw.isInf, raw.isZero, raw.sign, raw.sExp.asUInt, raw.sig)
+
+  def unpack(expWidth: Int, sigWidth: Int, bus: UInt): hardfloat.RawFloat = {
+    val out = Wire(new hardfloat.RawFloat(expWidth, sigWidth))
+    out.sig    := bus(sigWidth, 0)
+    out.sExp   := bus(sigWidth + expWidth + 2, sigWidth + 1).asSInt
+    out.sign   := bus(sigWidth + expWidth + 3)
+    out.isZero := bus(sigWidth + expWidth + 4)
+    out.isInf  := bus(sigWidth + expWidth + 5)
+    out.isNaN  := bus(sigWidth + expWidth + 6)
+    out
+  }
+}
+
+// Recoded float → packed raw bus, used to feed `AddRawFNBus` /
+// `MulRawFNBus` from existing recoded SSA values.
+class RecFNToRawFNBus(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"RecFNToRawFNBus_s${sigWidth}_e${expWidth}"
+  val io = IO(new Bundle {
+    val in  = Input(Bits((expWidth + sigWidth + 1).W))
+    val out = Output(UInt((expWidth + sigWidth + 7).W))
+  })
+  io.out := RawFloatBus.pack(hardfloat.rawFloatFromRecFN(expWidth, sigWidth, io.in))
+}
+
+// Berkeley `AddRawFN` wrapped with packed raw buses on a/b inputs and a
+// packed sig+2 bus on rawOut.
+//
+// NOTE: `AddRawFN.io.roundingMode` is only consulted to pick the sign of
+// zero on complete cancellation. The current hardfloat dialect lowering
+// hardcodes RNE (rounding mode = 0) everywhere, so we hardcode it here too.
+// When variable rounding modes become a thing in the dialect, plumb the
+// rm through.
+class AddRawFNBus(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"AddRawFNBus_s${sigWidth}_e${expWidth}"
+  val io = IO(new Bundle {
+    val subOp      = Input(Bool())
+    val a          = Input(UInt((expWidth + sigWidth + 7).W))
+    val b          = Input(UInt((expWidth + sigWidth + 7).W))
+    val invalidExc = Output(Bool())
+    val rawOut     = Output(UInt((expWidth + sigWidth + 9).W))
+  })
+  val inner = Module(new hardfloat.AddRawFN(expWidth, sigWidth))
+  inner.io.subOp        := io.subOp
+  inner.io.a            := RawFloatBus.unpack(expWidth, sigWidth, io.a)
+  inner.io.b            := RawFloatBus.unpack(expWidth, sigWidth, io.b)
+  inner.io.roundingMode := 0.U
+  io.invalidExc         := inner.io.invalidExc
+  io.rawOut             := RawFloatBus.pack(inner.io.rawOut)
+}
+
+// Berkeley `MulRawFN` wrapped with packed raw buses.
+class MulRawFNBus(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"MulRawFNBus_s${sigWidth}_e${expWidth}"
+  val io = IO(new Bundle {
+    val a          = Input(UInt((expWidth + sigWidth + 7).W))
+    val b          = Input(UInt((expWidth + sigWidth + 7).W))
+    val invalidExc = Output(Bool())
+    val rawOut     = Output(UInt((expWidth + sigWidth + 9).W))
+  })
+  val inner = Module(new hardfloat.MulRawFN(expWidth, sigWidth))
+  inner.io.a    := RawFloatBus.unpack(expWidth, sigWidth, io.a)
+  inner.io.b    := RawFloatBus.unpack(expWidth, sigWidth, io.b)
+  io.invalidExc := inner.io.invalidExc
+  io.rawOut     := RawFloatBus.pack(inner.io.rawOut)
+}
+
+// Berkeley `RoundRawFNToRecFN` wrapped with a packed sig+2 raw input bus.
+// NOTE: `infiniteExc` is hardcoded false — none of our add/mul paths
+// produce an exception-tagged infinity. Plumb when divsqrt joins the
+// pipeline.
+class RoundRawFNToRecFNBus(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"RoundRawFNToRecFNBus_s${sigWidth}_e${expWidth}"
+  val io = IO(new Bundle {
+    val invalidExc     = Input(Bool())
+    val in             = Input(UInt((expWidth + sigWidth + 9).W))
+    val roundingMode   = Input(UInt(3.W))
+    val detectTininess = Input(UInt(1.W))
+    val out            = Output(Bits((expWidth + sigWidth + 1).W))
+    val exceptionFlags = Output(Bits(5.W))
+  })
+  val inner = Module(new hardfloat.RoundRawFNToRecFN(expWidth, sigWidth, 0))
+  inner.io.invalidExc     := io.invalidExc
+  inner.io.infiniteExc    := false.B
+  inner.io.in             := RawFloatBus.unpack(expWidth, sigWidth + 2, io.in)
+  inner.io.roundingMode   := io.roundingMode
+  inner.io.detectTininess := io.detectTininess
+  io.out                  := inner.io.out
+  io.exceptionFlags       := inner.io.exceptionFlags
 }
 
 // Wraps hardfloat.MulAddRecFN to give it the _s${sigWidth}_e${expWidth} suffix
@@ -123,6 +225,10 @@ class EasyFloatTop(configs: Seq[Config]) extends RawModule {
       case "CompareRecFN" => Module(new CompareRecFNNamed(cfg.expWidth, cfg.sigWidth))
       case "RecFNToRecFN" => Module(new RecFNToRecFNNamed(cfg.expWidth, cfg.sigWidth, cfg.outExpWidth, cfg.outSigWidth))
       case "MulAddRecFN" => Module(new MulAddRecFNNamed(cfg.expWidth, cfg.sigWidth))
+      case "RecFNToRawFNBus" => Module(new RecFNToRawFNBus(cfg.expWidth, cfg.sigWidth))
+      case "AddRawFNBus" => Module(new AddRawFNBus(cfg.expWidth, cfg.sigWidth))
+      case "MulRawFNBus" => Module(new MulRawFNBus(cfg.expWidth, cfg.sigWidth))
+      case "RoundRawFNToRecFNBus" => Module(new RoundRawFNToRecFNBus(cfg.expWidth, cfg.sigWidth))
       case _ => throw new Exception(s"Unknown operation: ${cfg.operation}")
     }
 
