@@ -11,6 +11,8 @@ case class Config(
     expWidth : Int = 8,
     sigWidth : Int = 24,
     intWidth : Int = 32,
+    outExpWidth : Int = 8,
+    outSigWidth : Int = 24,
     outputFile : String = "",
     format : String = "hw",
     opsList : Seq[String] = Seq()
@@ -37,6 +39,74 @@ class fNFromRecFN(expWidth: Int, sigWidth: Int) extends RawModule {
   io.out := fNFromRecFN(expWidth, sigWidth, io.in)
 }
 
+// Wraps hardfloat.MulAddRecFN to give it the _s${sigWidth}_e${expWidth} suffix
+// convention (Berkeley's own desiredName uses _e_s order).
+class MulAddRecFNNamed(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"MulAddRecFN_s${sigWidth}_e${expWidth}"
+  val io = IO(new Bundle {
+    val op = Input(Bits(2.W))
+    val a = Input(Bits((expWidth + sigWidth + 1).W))
+    val b = Input(Bits((expWidth + sigWidth + 1).W))
+    val c = Input(Bits((expWidth + sigWidth + 1).W))
+    val roundingMode = Input(UInt(3.W))
+    val detectTininess = Input(UInt(1.W))
+    val out = Output(Bits((expWidth + sigWidth + 1).W))
+    val exceptionFlags = Output(Bits(5.W))
+  })
+
+  val inner = Module(new hardfloat.MulAddRecFN(expWidth, sigWidth))
+  inner.io.op := io.op
+  inner.io.a := io.a
+  inner.io.b := io.b
+  inner.io.c := io.c
+  inner.io.roundingMode := io.roundingMode
+  inner.io.detectTininess := io.detectTininess
+  io.out := inner.io.out
+  io.exceptionFlags := inner.io.exceptionFlags
+}
+
+// Wraps hardfloat.RecFNToRecFN so the emitted module is named with all four widths.
+class RecFNToRecFNNamed(inExpWidth: Int, inSigWidth: Int, outExpWidth: Int, outSigWidth: Int) extends RawModule {
+  override def desiredName = s"RecFNToRecFN_is${inSigWidth}_ie${inExpWidth}_os${outSigWidth}_oe${outExpWidth}"
+  val io = IO(new Bundle {
+    val in = Input(Bits((inExpWidth + inSigWidth + 1).W))
+    val roundingMode = Input(UInt(3.W))
+    val detectTininess = Input(UInt(1.W))
+    val out = Output(Bits((outExpWidth + outSigWidth + 1).W))
+    val exceptionFlags = Output(Bits(5.W))
+  })
+
+  val inner = Module(new hardfloat.RecFNToRecFN(inExpWidth, inSigWidth, outExpWidth, outSigWidth))
+  inner.io.in := io.in
+  inner.io.roundingMode := io.roundingMode
+  inner.io.detectTininess := io.detectTininess
+  io.out := inner.io.out
+  io.exceptionFlags := inner.io.exceptionFlags
+}
+
+// Wraps hardfloat.CompareRecFN to give it a name with widths in it
+class CompareRecFNNamed(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"CompareRecFN_s${sigWidth}_e${expWidth}"
+  val io = IO(new Bundle {
+    val a = Input(Bits((expWidth + sigWidth + 1).W))
+    val b = Input(Bits((expWidth + sigWidth + 1).W))
+    val signaling = Input(Bool())
+    val lt = Output(Bool())
+    val eq = Output(Bool())
+    val gt = Output(Bool())
+    val exceptionFlags = Output(Bits(5.W))
+  })
+
+  val inner = Module(new hardfloat.CompareRecFN(expWidth, sigWidth))
+  inner.io.a := io.a
+  inner.io.b := io.b
+  inner.io.signaling := io.signaling
+  io.lt := inner.io.lt
+  io.eq := inner.io.eq
+  io.gt := inner.io.gt
+  io.exceptionFlags := inner.io.exceptionFlags
+}
+
 
 
 // The Wrapper Module that holds all requested components
@@ -50,6 +120,9 @@ class EasyFloatTop(configs: Seq[Config]) extends RawModule {
       case "fNFromRecFN" => Module(new fNFromRecFN(cfg.expWidth, cfg.sigWidth))
       case "RecFNToIN" => Module(new hardfloat.RecFNToIN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
       case "INToRecFN" => Module(new hardfloat.INToRecFN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
+      case "CompareRecFN" => Module(new CompareRecFNNamed(cfg.expWidth, cfg.sigWidth))
+      case "RecFNToRecFN" => Module(new RecFNToRecFNNamed(cfg.expWidth, cfg.sigWidth, cfg.outExpWidth, cfg.outSigWidth))
+      case "MulAddRecFN" => Module(new MulAddRecFNNamed(cfg.expWidth, cfg.sigWidth))
       case _ => throw new Exception(s"Unknown operation: ${cfg.operation}")
     }
 
@@ -79,15 +152,29 @@ object EasyFloatGenerator extends App {
       // Convert the list of strings into a list of Config objects
       val tasks = if (config.opsList.nonEmpty) {
         config.opsList.map { opString =>
-          // Basic logic to parse strings like "AddRecFN_s24_e8"
+          // Parse names like "AddRecFN_s24_e8" or "RecFNToRecFN_is24_ie8_os11_oe5"
           val parts = opString.split("_")
           val opName = parts(0)
-          // Extract widths from string, otherwise use defaults from CLI
-          val sW = parts.find(_.startsWith("s")).map(_.drop(1).toInt).getOrElse(config.sigWidth)
-          val eW = parts.find(_.startsWith("e")).map(_.drop(1).toInt).getOrElse(config.expWidth)
-          val iW = parts.find(_.startsWith("i")).map(_.drop(1).toInt).getOrElse(config.intWidth)
+          // The dual-width form prefixes widths with "is"/"ie" (input) and
+          // "os"/"oe" (output). Single-width ops use bare "s"/"e"/"i".
+          def find(prefix: String) =
+            parts.find(p => p.startsWith(prefix) && p.drop(prefix.length).forall(_.isDigit))
+              .map(_.drop(prefix.length).toInt)
+          val isW = find("is")
+          val ieW = find("ie")
+          val osW = find("os")
+          val oeW = find("oe")
+          val sW = isW.orElse(parts.find(_.startsWith("s")).map(_.drop(1).toInt)).getOrElse(config.sigWidth)
+          val eW = ieW.orElse(parts.find(_.startsWith("e")).map(_.drop(1).toInt)).getOrElse(config.expWidth)
+          val iW = parts.find(p => p.startsWith("i") && p.drop(1).forall(_.isDigit))
+            .map(_.drop(1).toInt).getOrElse(config.intWidth)
+          val oS = osW.getOrElse(config.outSigWidth)
+          val oE = oeW.getOrElse(config.outExpWidth)
 
-          Config(operation = opName, expWidth = eW, sigWidth = sW, intWidth = iW)
+          Config(
+            operation = opName, expWidth = eW, sigWidth = sW, intWidth = iW,
+            outExpWidth = oE, outSigWidth = oS,
+          )
         }
       } else {
         // Fallback to the single operation if no list is provided
