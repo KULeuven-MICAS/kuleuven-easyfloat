@@ -37,6 +37,29 @@ class fNFromRecFN(expWidth: Int, sigWidth: Int) extends RawModule {
   io.out := fNFromRecFN(expWidth, sigWidth, io.in)
 }
 
+// Wraps hardfloat.CompareRecFN to give it a name with widths in it
+class CompareRecFNNamed(expWidth: Int, sigWidth: Int) extends RawModule {
+  override def desiredName = s"CompareRecFN_s${sigWidth}_e${expWidth}"
+  val io = IO(new Bundle {
+    val a = Input(Bits((expWidth + sigWidth + 1).W))
+    val b = Input(Bits((expWidth + sigWidth + 1).W))
+    val signaling = Input(Bool())
+    val lt = Output(Bool())
+    val eq = Output(Bool())
+    val gt = Output(Bool())
+    val exceptionFlags = Output(Bits(5.W))
+  })
+
+  val inner = Module(new hardfloat.CompareRecFN(expWidth, sigWidth))
+  inner.io.a := io.a
+  inner.io.b := io.b
+  inner.io.signaling := io.signaling
+  io.lt := inner.io.lt
+  io.eq := inner.io.eq
+  io.gt := inner.io.gt
+  io.exceptionFlags := inner.io.exceptionFlags
+}
+
 
 
 // The Wrapper Module that holds all requested components
@@ -50,6 +73,7 @@ class EasyFloatTop(configs: Seq[Config]) extends RawModule {
       case "fNFromRecFN" => Module(new fNFromRecFN(cfg.expWidth, cfg.sigWidth))
       case "RecFNToIN" => Module(new hardfloat.RecFNToIN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
       case "INToRecFN" => Module(new hardfloat.INToRecFN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
+      case "CompareRecFN" => Module(new CompareRecFNNamed(cfg.expWidth, cfg.sigWidth))
       case _ => throw new Exception(s"Unknown operation: ${cfg.operation}")
     }
 
