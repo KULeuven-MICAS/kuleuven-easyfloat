@@ -221,7 +221,7 @@ class EasyFloatTop(configs: Seq[Config]) extends RawModule {
       case "recFNFromFN" => Module(new recFNFromFN(cfg.expWidth, cfg.sigWidth))
       case "fNFromRecFN" => Module(new fNFromRecFN(cfg.expWidth, cfg.sigWidth))
       case "RecFNToIN" => Module(new hardfloat.RecFNToIN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
-      case "INToRecFN" => Module(new hardfloat.INToRecFN(cfg.expWidth, cfg.sigWidth, cfg.intWidth))
+      case "INToRecFN" => Module(new hardfloat.INToRecFN(cfg.intWidth, cfg.expWidth, cfg.sigWidth))
       case "CompareRecFN" => Module(new CompareRecFNNamed(cfg.expWidth, cfg.sigWidth))
       case "RecFNToRecFN" => Module(new RecFNToRecFNNamed(cfg.expWidth, cfg.sigWidth, cfg.outExpWidth, cfg.outSigWidth))
       case "MulAddRecFN" => Module(new MulAddRecFNNamed(cfg.expWidth, cfg.sigWidth))
